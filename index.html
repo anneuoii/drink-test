@@ -1,320 +1,324 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>飲料點單小幫手 - 您的隨身點單筆記</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
-    <style>
-        body {
-            font-family: 'Noto Sans TC', sans-serif;
-            background-color: #F9F7F5;
-            color: #6D5D54;
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  Plus, Trash2, Coffee, ChevronRight, IceCream, 
+  Droplets, Store, Sparkles, X, Copy, Check, 
+  Thermometer, Maximize2, Cloud, Loader2, StickyNote, Search,
+  ThumbsUp, ThumbsDown, Dices, Trophy, Phone, Edit2, DollarSign,
+  Image as ImageIcon, ExternalLink, Settings, Download, Upload, FileJson,
+  FileText, ChevronDown, ChevronUp, MoreHorizontal
+} from 'lucide-react';
+import { initializeApp } from "firebase/app";
+import { 
+  getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken 
+} from "firebase/auth";
+import { 
+  getFirestore, collection, doc, addDoc, updateDoc, 
+  deleteDoc, onSnapshot, query 
+} from "firebase/firestore";
+
+// --- Firebase 初始化 ---
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-beverage-app';
+
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [stores, setStores] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  const [activeStoreId, setActiveStoreId] = useState(null);
+  const [showAddStore, setShowAddStore] = useState(false);
+  const [newStoreName, setNewStoreName] = useState('');
+  const [newStorePhone, setNewStorePhone] = useState('');
+  const [newStoreImage, setNewStoreImage] = useState(''); 
+  const [newStoreMenu, setNewStoreMenu] = useState(''); 
+  
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterLikedOnly, setFilterLikedOnly] = useState(false);
+
+  // Random Picker State
+  const [showRandomPicker, setShowRandomPicker] = useState(false);
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [randomResult, setRandomResult] = useState(null);
+  const [spinningName, setSpinningName] = useState('今天喝什麼？');
+  const timerRef = useRef(null);
+
+  // Settings / Import / Export State
+  const [showSettings, setShowSettings] = useState(false);
+  const fileInputRef = useRef(null);
+  const [isImporting, setIsImporting] = useState(false);
+
+  // UI State
+  const [showStoreInfoEdit, setShowStoreInfoEdit] = useState(false); // 控制店家資訊編輯欄位的展開/收合
+
+  // 初始狀態
+  const [newDrink, setNewDrink] = useState({ name: '', price: '', size: '大杯', sugar: '微糖', ice: '去冰', toppings: [], remarks: '', rating: null });
+  const [customTopping, setCustomTopping] = useState('');
+  const [isAddingCustom, setIsAddingCustom] = useState(false);
+  const [copiedId, setCopiedId] = useState(null);
+  const [showDeleteModal, setShowDeleteModal] = useState({ show: false, id: null, type: '' });
+
+  // 選項設定
+  const sizeOptions = ['特大杯', '大杯', '中杯', '小杯'];
+  const sugarOptions = [
+    '無糖', '一分糖', '六分之一糖', '兩分糖', '微糖', '半糖', 
+    '一下糖', '兩下糖', '三下糖'
+  ];
+  const iceOptions = [
+    '完全去冰', '去冰', '微冰', '少冰', '正常冰', '溫', '熱'
+  ];
+  const fixedToppingOptions = ['珍珠', '混珍', '粉粿', '仙草'];
+
+  // 顏色定義
+  const colors = {
+    bg: 'bg-[#F9F7F5]', 
+    primaryBlue: 'text-[#9BB7D4]', 
+    lightBlue: 'bg-[#E3EBF3]', 
+    primaryBrown: 'text-[#B09B8E]', 
+    lightBrown: 'bg-[#F1EDE9]', 
+    accentBrown: 'bg-[#C5B4A8]', 
+    darkBrown: 'text-[#6D5D54]', 
+  };
+
+  // --- 1. 驗證 ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
         }
-        .custom-shadow {
-            box-shadow: 0 10px 25px -5px rgba(176, 155, 142, 0.1);
+      } catch (err) {
+        console.error("Auth failed", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // --- 2. 資料同步 (Firestore Listener) ---
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'artifacts', appId, 'users', user.uid, 'stores')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const storesData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      storesData.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+      
+      setStores(storesData);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error fetching data:", error);
+      setIsLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
+
+  // 重置編輯狀態當切換店家時
+  useEffect(() => {
+    setShowStoreInfoEdit(false);
+  }, [activeStoreId]);
+
+  // --- 操作功能 ---
+
+  const addStore = async () => {
+    if (!newStoreName.trim() || !user) return;
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'stores'), {
+        name: newStoreName,
+        phone: newStorePhone,
+        imageUrl: newStoreImage, 
+        menuUrl: newStoreMenu, 
+        drinks: [],
+        rating: null, 
+        createdAt: Date.now()
+      });
+      setNewStoreName('');
+      setNewStorePhone('');
+      setNewStoreImage('');
+      setNewStoreMenu('');
+      setShowAddStore(false);
+    } catch (err) {
+      console.error("Add store failed", err);
+    }
+  };
+
+  const updateStoreName = async (newName) => {
+    if (!user || !activeStoreId || !newName.trim()) return;
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', activeStoreId), {
+            name: newName.trim()
+        });
+    } catch (err) {
+        console.error("Update name failed", err);
+    }
+  };
+
+  const updateStorePhone = async (newPhone) => {
+    if (!user || !activeStoreId) return;
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', activeStoreId), {
+            phone: newPhone
+        });
+    } catch (err) {
+        console.error("Update phone failed", err);
+    }
+  };
+
+  const updateStoreImage = async (newImage) => {
+    if (!user || !activeStoreId) return;
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', activeStoreId), {
+            imageUrl: newImage
+        });
+    } catch (err) {
+        console.error("Update image failed", err);
+    }
+  };
+
+  const updateStoreMenu = async (newMenu) => {
+    if (!user || !activeStoreId) return;
+    try {
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', activeStoreId), {
+            menuUrl: newMenu
+        });
+    } catch (err) {
+        console.error("Update menu failed", err);
+    }
+  };
+
+  // 通用更新飲品欄位
+  const updateDrinkField = async (storeId, drinkId, field, value) => {
+    if (!user) return;
+    const store = stores.find(s => s.id === storeId);
+    if (!store) return;
+
+    const updatedDrinks = store.drinks.map(d => {
+        if (d.id === drinkId) {
+            return { ...d, [field]: value };
         }
-        .animate-fade-in {
-            animation: fadeIn 0.3s ease-out;
+        return d;
+    });
+
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', storeId), {
+          drinks: updatedDrinks
+      });
+    } catch (err) {
+      console.error(`Failed to update ${field}`, err);
+    }
+  };
+
+  const toggleRating = async (e, store, ratingType) => {
+    e.stopPropagation(); 
+    if (!user) return;
+
+    const newRating = store.rating === ratingType ? null : ratingType;
+
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', store.id), {
+        rating: newRating
+      });
+    } catch (err) {
+      console.error("Update rating failed", err);
+    }
+  };
+
+  const toggleDrinkRating = async (storeId, drinkId, ratingType) => {
+    if (!user) return;
+    const store = stores.find(s => s.id === storeId);
+    if (!store) return;
+
+    const updatedDrinks = store.drinks.map(d => {
+        if (d.id === drinkId) {
+            const newRating = d.rating === ratingType ? null : ratingType;
+            return { ...d, rating: newRating };
         }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        select {
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23B09B8E'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 0.5rem center;
-            background-size: 1.2em;
-        }
-        /* 隱藏滾動條但保持功能 */
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-        .no-scrollbar {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-    </style>
-</head>
-<body class="pb-20">
+        return d;
+    });
 
-    <!-- Header -->
-    <header class="bg-white/80 backdrop-blur-md p-6 sticky top-0 z-10 border-b border-[#EAE2DC]">
-        <div class="max-w-md mx-auto flex justify-between items-center">
-            <div class="flex flex-col">
-                <span class="text-[10px] uppercase tracking-widest text-[#B09B8E] font-bold">Beverage Memo</span>
-                <h1 class="text-xl font-medium tracking-tight flex items-center gap-2">
-                    飲品清單 <span id="header-icon">☕</span>
-                </h1>
-            </div>
-            <button onclick="toggleModal('storeModal', true)" class="bg-[#C5B4A8] text-white w-10 h-10 rounded-full flex items-center justify-center hover:opacity-90 transition-all shadow-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-                </svg>
-            </button>
-        </div>
-    </header>
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', storeId), {
+          drinks: updatedDrinks
+      });
+    } catch (err) {
+      console.error("Failed to rate drink", err);
+    }
+  };
 
-    <main id="app" class="max-w-md mx-auto p-5">
-        <!-- 內容將由 JS 動態渲染 -->
-    </main>
+  const confirmDeleteStore = (e, id) => {
+    e.stopPropagation();
+    setShowDeleteModal({ show: true, id: id, type: 'store' });
+  };
 
-    <!-- 新增店家彈窗 -->
-    <div id="storeModal" class="fixed inset-0 bg-slate-900/10 backdrop-blur-[2px] hidden items-center justify-center p-8 z-50">
-        <div class="bg-white w-full max-w-xs rounded-[2.5rem] p-8 shadow-xl animate-fade-in">
-            <h3 class="text-lg font-medium mb-5 text-center">新增店家</h3>
-            <input type="text" id="storeNameInput" placeholder="店家名稱 (如: 五十嵐)" class="w-full p-3 bg-[#F9F7F5] rounded-xl border-none focus:ring-1 focus:ring-[#9BB7D4] outline-none mb-6 text-center text-sm">
-            <div class="flex gap-4">
-                <button onclick="toggleModal('storeModal', false)" class="flex-1 text-xs text-[#B09B8E] font-bold">取消</button>
-                <button onclick="addStore()" class="flex-1 p-3 bg-[#C5B4A8] text-white rounded-xl text-xs font-bold shadow-sm">建立</button>
-            </div>
-        </div>
-    </div>
+  const performDelete = async () => {
+    const { id, type, drinkId } = showDeleteModal;
+    if (!user) return;
 
-    <script>
-        // 從 LocalStorage 載入資料或使用初始值
-        const STORAGE_KEY = 'drink_tracker_data';
-        let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
-            stores: [
-                { id: 1, name: '五十嵐', drinks: [{ id: 101, name: '波霸奶茶', size: '大杯', sugar: '微糖', ice: '去冰', toppings: ['珍珠'] }] },
-                { id: 2, name: '可不可', drinks: [{ id: 201, name: '熟成紅茶', size: '大杯', sugar: '半糖', ice: '少冰', toppings: [] }] }
-            ],
-            activeStoreId: null,
-            selectedToppings: []
-        };
+    try {
+      if (type === 'store') {
+        await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', id));
+        if (activeStoreId === id) setActiveStoreId(null);
+      } else if (type === 'drink') {
+        const targetStore = stores.find(s => s.id === id);
+        const updatedDrinks = targetStore.drinks.filter(d => d.id !== drinkId);
+        await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', id), {
+          drinks: updatedDrinks
+        });
+      }
+    } catch (err) {
+      console.error("Delete operation failed", err);
+    }
+    setShowDeleteModal({ show: false, id: null, type: '' });
+  };
 
-        // 每次 state 改變時儲存到 LocalStorage
-        function saveState() {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                ...state,
-                activeStoreId: null, // 重新整理後回到列表
-                selectedToppings: []
-            }));
-        }
+  const toggleTopping = (topping) => {
+    setNewDrink(prev => ({
+      ...prev,
+      toppings: prev.toppings.includes(topping)
+        ? prev.toppings.filter(t => t !== topping)
+        : [...prev.toppings, topping]
+    }));
+  };
 
-        const sizeOptions = ['特大杯', '大杯', '中杯', '小杯'];
-        const sugarOptions = ['無糖', '一分糖', '六分之一糖', '兩分糖', '微糖', '半糖', '一下糖', '兩下糖', '三下糖'];
-        const iceOptions = ['完全去冰', '去冰', '微冰', '少冰', '正常冰', '溫', '熱'];
-        const fixedToppings = ['珍珠', '混珍', '粉粿', '仙草'];
+  const addCustomTopping = () => {
+    if (!customTopping.trim()) return;
+    if (!newDrink.toppings.includes(customTopping.trim())) {
+      setNewDrink(prev => ({
+        ...prev,
+        toppings: [...prev.toppings, customTopping.trim()]
+      }));
+    }
+    setCustomTopping('');
+    setIsAddingCustom(false);
+  };
 
-        function render() {
-            const app = document.getElementById('app');
-            if (state.activeStoreId === null) {
-                renderStoreList(app);
-            } else {
-                renderDrinkDetail(app);
-            }
-            saveState();
-        }
+  const addDrink = async (storeId) => {
+    if (!newDrink.name.trim() || !user) return;
+    
+    const targetStore = stores.find(s => s.id === storeId);
+    if (!targetStore) return;
 
-        function renderStoreList(container) {
-            let html = `<div class="space-y-4 animate-fade-in">`;
-            if (state.stores.length === 0) {
-                html += `<div class="text-center py-24 text-[#D0C5BD]"><p class="text-sm">還沒有記錄任何店家呢</p></div>`;
-            }
-            state.stores.forEach(store => {
-                html += `
-                    <div onclick="setActiveStore(${store.id})" class="bg-white p-5 rounded-[2rem] border border-[#F1EDE9] flex justify-between items-center cursor-pointer hover:shadow-lg transition-all active:scale-[0.98]">
-                        <div class="flex items-center gap-4">
-                            <div class="w-14 h-14 bg-[#E3EBF3] rounded-2xl flex items-center justify-center font-medium text-lg text-[#9BB7D4]">${store.name[0]}</div>
-                            <div>
-                                <h2 class="text-base font-medium text-slate-700">${store.name}</h2>
-                                <p class="text-xs text-[#B09B8E] mt-0.5">${store.drinks.length} 項目</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <button onclick="deleteStore(event, ${store.id})" class="p-2 text-slate-200 hover:text-red-300 transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                            </button>
-                        </div>
-                    </div>
-                `;
-            });
-            html += `</div>`;
-            container.innerHTML = html;
-        }
+    const newDrinkItem = { ...newDrink, id: Date.now(), rating: null };
+    const updatedDrinks = [...(targetStore.drinks || []), newDrinkItem];
 
-        function renderDrinkDetail(container) {
-            const store = state.stores.find(s => s.id === state.activeStoreId);
-            if(!store) { setActiveStore(null); return; }
-            
-            let html = `
-                <div class="space-y-6 animate-fade-in">
-                    <button onclick="setActiveStore(null)" class="text-[#9BB7D4] text-sm font-medium flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">← 返回列表</button>
-                    <h2 class="text-2xl font-light text-slate-800 px-1">${store.name}</h2>
-
-                    <!-- 新增表單 -->
-                    <div class="bg-white p-6 rounded-[2.5rem] border border-[#F1EDE9] shadow-sm space-y-5">
-                        <input type="text" id="drinkNameInput" placeholder="飲品名稱" class="w-full p-3 bg-transparent border-b border-[#F1EDE9] focus:border-[#9BB7D4] outline-none text-base placeholder-[#D0C5BD]">
-                        
-                        <div class="grid grid-cols-3 gap-3">
-                            <div class="space-y-1">
-                                <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase">Size</label>
-                                <select id="sizeSelect" class="w-full p-2 bg-[#F1EDE9] rounded-xl text-xs border-none outline-none appearance-none cursor-pointer">
-                                    ${sizeOptions.map(opt => `<option value="${opt}" ${opt==='大杯'?'selected':''}>${opt}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div class="space-y-1">
-                                <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase">Sugar</label>
-                                <select id="sugarSelect" class="w-full p-2 bg-[#F1EDE9] rounded-xl text-xs border-none outline-none appearance-none cursor-pointer">
-                                    ${sugarOptions.map(opt => `<option value="${opt}" ${opt==='微糖'?'selected':''}>${opt}</option>`).join('')}
-                                </select>
-                            </div>
-                            <div class="space-y-1">
-                                <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase">Ice</label>
-                                <select id="iceSelect" class="w-full p-2 bg-[#E3EBF3] rounded-xl text-xs border-none outline-none appearance-none cursor-pointer">
-                                    ${iceOptions.map(opt => `<option value="${opt}" ${opt==='去冰'?'selected':''}>${opt}</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div>
-                            <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase mb-2 block">Toppings</label>
-                            <div class="flex flex-wrap gap-2" id="toppingContainer">
-                                ${fixedToppings.map(t => `
-                                    <button onclick="toggleTopping('${t}')" class="topping-btn px-3 py-1.5 rounded-full text-xs font-medium border border-[#F1EDE9] transition-all ${state.selectedToppings.includes(t) ? 'bg-[#C5B4A8] text-white shadow-sm' : 'bg-[#F9F7F5] text-[#B09B8E]'}">
-                                        ${t}
-                                    </button>
-                                `).join('')}
-                                <button onclick="promptTopping()" class="px-3 py-1.5 rounded-full text-xs font-medium text-[#B09B8E] border border-dashed border-[#D0C5BD] hover:bg-[#F1EDE9] transition-colors">+ 自定義</button>
-                            </div>
-                        </div>
-
-                        <button onclick="addDrink()" class="w-full bg-[#C5B4A8] text-white p-3.5 rounded-2xl text-sm font-medium shadow-sm active:scale-[0.98] hover:opacity-90 transition-all">加入清單</button>
-                    </div>
-
-                    <!-- 飲品列表 -->
-                    <div class="space-y-4">
-                        ${store.drinks.map(drink => `
-                            <div class="bg-white p-5 rounded-[2rem] border border-[#F1EDE9] flex justify-between items-center group animate-fade-in">
-                                <div class="flex-1">
-                                    <h3 class="font-medium text-base text-slate-700">${drink.name}</h3>
-                                    <div class="flex flex-wrap gap-2 mt-2">
-                                        <span class="text-[10px] px-2.5 py-1 bg-slate-50 text-slate-500 rounded-full font-bold border border-slate-100">${drink.size}</span>
-                                        <span class="text-[10px] px-2.5 py-1 bg-[#F1EDE9] text-[#B09B8E] rounded-full font-bold">${drink.sugar}</span>
-                                        <span class="text-[10px] px-2.5 py-1 ${['溫', '熱'].includes(drink.ice) ? 'bg-orange-50 text-orange-400' : 'bg-[#E3EBF3] text-[#9BB7D4]'} rounded-full font-bold">
-                                            ${drink.ice}
-                                        </span>
-                                        ${drink.toppings.length > 0 ? `<span class="text-[10px] px-2.5 py-1 bg-[#F9F7F5] text-[#C5B4A8] rounded-full font-bold border border-[#F1EDE9]">${drink.toppings.join(', ')}</span>` : ''}
-                                    </div>
-                                </div>
-                                <div class="flex items-center gap-1">
-                                    <button onclick="copyInfo('${store.name}', ${drink.id})" class="p-2 text-[#D0C5BD] hover:text-[#B09B8E] copy-btn-${drink.id} transition-colors">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
-                                    </button>
-                                    <button onclick="deleteDrink(${drink.id})" class="p-2 text-slate-200 hover:text-red-300 transition-colors">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                                    </button>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                </div>
-            `;
-            container.innerHTML = html;
-        }
-
-        // 行動功能
-        function toggleModal(id, show) {
-            document.getElementById(id).style.display = show ? 'flex' : 'none';
-            if(show) document.getElementById('storeNameInput').focus();
-        }
-
-        function setActiveStore(id) {
-            state.activeStoreId = id;
-            state.selectedToppings = [];
-            render();
-        }
-
-        function addStore() {
-            const name = document.getElementById('storeNameInput').value;
-            if (!name.trim()) return;
-            state.stores.push({ id: Date.now(), name, drinks: [] });
-            document.getElementById('storeNameInput').value = '';
-            toggleModal('storeModal', false);
-            render();
-        }
-
-        function deleteStore(e, id) {
-            e.stopPropagation();
-            if(!confirm(`確定要刪除此店家嗎？`)) return;
-            state.stores = state.stores.filter(s => s.id !== id);
-            render();
-        }
-
-        function toggleTopping(name) {
-            if (state.selectedToppings.includes(name)) {
-                state.selectedToppings = state.selectedToppings.filter(t => t !== name);
-            } else {
-                state.selectedToppings.push(name);
-            }
-            render();
-        }
-
-        function promptTopping() {
-            const val = prompt("請輸入自定義配料：");
-            if (val && val.trim()) {
-                toggleTopping(val.trim());
-            }
-        }
-
-        function addDrink() {
-            const nameInput = document.getElementById('drinkNameInput');
-            const name = nameInput.value;
-            if (!name.trim()) return;
-            
-            const drink = {
-                id: Date.now(),
-                name,
-                size: document.getElementById('sizeSelect').value,
-                sugar: document.getElementById('sugarSelect').value,
-                ice: document.getElementById('iceSelect').value,
-                toppings: [...state.selectedToppings]
-            };
-
-            const store = state.stores.find(s => s.id === state.activeStoreId);
-            store.drinks.unshift(drink); // 新的放前面
-            state.selectedToppings = [];
-            nameInput.value = '';
-            render();
-        }
-
-        function deleteDrink(drinkId) {
-            const store = state.stores.find(s => s.id === state.activeStoreId);
-            store.drinks = store.drinks.filter(d => d.id !== drinkId);
-            render();
-        }
-
-        function copyInfo(storeName, drinkId) {
-            const store = state.stores.find(s => s.id === state.activeStoreId);
-            const drink = store.drinks.find(d => d.id === drinkId);
-            const toppingStr = drink.toppings.length > 0 ? ` +${drink.toppings.join(', ')}` : '';
-            const text = `[${storeName}] ${drink.name} (${drink.size}/${drink.sugar}/${drink.ice})${toppingStr}`;
-
-            // 備用複製方法以確保相容性
-            const el = document.createElement('textarea');
-            el.value = text;
-            el.setAttribute('readonly', '');
-            el.style.position = 'absolute';
-            el.style.left = '-9999px';
-            document.body.appendChild(el);
-            el.select();
-            try {
-                document.execCommand('copy');
-                const btn = document.querySelector(`.copy-btn-${drinkId}`);
-                const originalIcon = btn.innerHTML;
-                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>`;
-                setTimeout(() => btn.innerHTML = originalIcon, 2000);
-            } catch (err) {
-                console.error('無法複製', err);
-            }
-            document.body.removeChild(el);
-        }
-
-        // 初始化渲染
-        render();
-    </script>
-</body>
-</html>
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'stores', storeId), {
+        drinks: updatedDrinks
+      });
+      setNewDrink({ name: '', price: '', size: '大杯

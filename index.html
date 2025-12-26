@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>飲料點單小幫手</title>
+    <title>飲料點單小幫手 - 您的隨身點單筆記</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
     <style>
@@ -27,6 +27,14 @@
             background-repeat: no-repeat;
             background-position: right 0.5rem center;
             background-size: 1.2em;
+        }
+        /* 隱藏滾動條但保持功能 */
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
         }
     </style>
 </head>
@@ -66,8 +74,9 @@
     </div>
 
     <script>
-        // 初始資料
-        let state = {
+        // 從 LocalStorage 載入資料或使用初始值
+        const STORAGE_KEY = 'drink_tracker_data';
+        let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
             stores: [
                 { id: 1, name: '五十嵐', drinks: [{ id: 101, name: '波霸奶茶', size: '大杯', sugar: '微糖', ice: '去冰', toppings: ['珍珠'] }] },
                 { id: 2, name: '可不可', drinks: [{ id: 201, name: '熟成紅茶', size: '大杯', sugar: '半糖', ice: '少冰', toppings: [] }] }
@@ -75,6 +84,15 @@
             activeStoreId: null,
             selectedToppings: []
         };
+
+        // 每次 state 改變時儲存到 LocalStorage
+        function saveState() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                ...state,
+                activeStoreId: null, // 重新整理後回到列表
+                selectedToppings: []
+            }));
+        }
 
         const sizeOptions = ['特大杯', '大杯', '中杯', '小杯'];
         const sugarOptions = ['無糖', '一分糖', '六分之一糖', '兩分糖', '微糖', '半糖', '一下糖', '兩下糖', '三下糖'];
@@ -88,6 +106,7 @@
             } else {
                 renderDrinkDetail(app);
             }
+            saveState();
         }
 
         function renderStoreList(container) {
@@ -106,7 +125,7 @@
                             </div>
                         </div>
                         <div class="flex items-center gap-3">
-                            <button onclick="deleteStore(event, ${store.id})" class="p-2 text-slate-200 hover:text-red-300">
+                            <button onclick="deleteStore(event, ${store.id})" class="p-2 text-slate-200 hover:text-red-300 transition-colors">
                                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                             </button>
                         </div>
@@ -119,9 +138,11 @@
 
         function renderDrinkDetail(container) {
             const store = state.stores.find(s => s.id === state.activeStoreId);
+            if(!store) { setActiveStore(null); return; }
+            
             let html = `
                 <div class="space-y-6 animate-fade-in">
-                    <button onclick="setActiveStore(null)" class="text-[#9BB7D4] text-sm font-medium flex items-center gap-1 opacity-80 hover:opacity-100">← 返回列表</button>
+                    <button onclick="setActiveStore(null)" class="text-[#9BB7D4] text-sm font-medium flex items-center gap-1 opacity-80 hover:opacity-100 transition-opacity">← 返回列表</button>
                     <h2 class="text-2xl font-light text-slate-800 px-1">${store.name}</h2>
 
                     <!-- 新增表單 -->
@@ -131,19 +152,19 @@
                         <div class="grid grid-cols-3 gap-3">
                             <div class="space-y-1">
                                 <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase">Size</label>
-                                <select id="sizeSelect" class="w-full p-2 bg-[#F1EDE9] rounded-xl text-xs border-none outline-none appearance-none">
+                                <select id="sizeSelect" class="w-full p-2 bg-[#F1EDE9] rounded-xl text-xs border-none outline-none appearance-none cursor-pointer">
                                     ${sizeOptions.map(opt => `<option value="${opt}" ${opt==='大杯'?'selected':''}>${opt}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="space-y-1">
                                 <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase">Sugar</label>
-                                <select id="sugarSelect" class="w-full p-2 bg-[#F1EDE9] rounded-xl text-xs border-none outline-none appearance-none">
+                                <select id="sugarSelect" class="w-full p-2 bg-[#F1EDE9] rounded-xl text-xs border-none outline-none appearance-none cursor-pointer">
                                     ${sugarOptions.map(opt => `<option value="${opt}" ${opt==='微糖'?'selected':''}>${opt}</option>`).join('')}
                                 </select>
                             </div>
                             <div class="space-y-1">
                                 <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase">Ice</label>
-                                <select id="iceSelect" class="w-full p-2 bg-[#E3EBF3] rounded-xl text-xs border-none outline-none appearance-none">
+                                <select id="iceSelect" class="w-full p-2 bg-[#E3EBF3] rounded-xl text-xs border-none outline-none appearance-none cursor-pointer">
                                     ${iceOptions.map(opt => `<option value="${opt}" ${opt==='去冰'?'selected':''}>${opt}</option>`).join('')}
                                 </select>
                             </div>
@@ -153,21 +174,21 @@
                             <label class="text-[10px] text-[#B09B8E] font-bold px-1 uppercase mb-2 block">Toppings</label>
                             <div class="flex flex-wrap gap-2" id="toppingContainer">
                                 ${fixedToppings.map(t => `
-                                    <button onclick="toggleTopping('${t}')" class="topping-btn px-3 py-1.5 rounded-full text-xs font-medium border border-[#F1EDE9] ${state.selectedToppings.includes(t) ? 'bg-[#C5B4A8] text-white' : 'bg-[#F9F7F5] text-[#B09B8E]'}">
+                                    <button onclick="toggleTopping('${t}')" class="topping-btn px-3 py-1.5 rounded-full text-xs font-medium border border-[#F1EDE9] transition-all ${state.selectedToppings.includes(t) ? 'bg-[#C5B4A8] text-white shadow-sm' : 'bg-[#F9F7F5] text-[#B09B8E]'}">
                                         ${t}
                                     </button>
                                 `).join('')}
-                                <button onclick="promptTopping()" class="px-3 py-1.5 rounded-full text-xs font-medium text-[#B09B8E] border border-dashed border-[#D0C5BD]">+ 自定義</button>
+                                <button onclick="promptTopping()" class="px-3 py-1.5 rounded-full text-xs font-medium text-[#B09B8E] border border-dashed border-[#D0C5BD] hover:bg-[#F1EDE9] transition-colors">+ 自定義</button>
                             </div>
                         </div>
 
-                        <button onclick="addDrink()" class="w-full bg-[#C5B4A8] text-white p-3.5 rounded-2xl text-sm font-medium shadow-sm active:scale-[0.98]">加入清單</button>
+                        <button onclick="addDrink()" class="w-full bg-[#C5B4A8] text-white p-3.5 rounded-2xl text-sm font-medium shadow-sm active:scale-[0.98] hover:opacity-90 transition-all">加入清單</button>
                     </div>
 
                     <!-- 飲品列表 -->
                     <div class="space-y-4">
                         ${store.drinks.map(drink => `
-                            <div class="bg-white p-5 rounded-[2rem] border border-[#F1EDE9] flex justify-between items-center">
+                            <div class="bg-white p-5 rounded-[2rem] border border-[#F1EDE9] flex justify-between items-center group animate-fade-in">
                                 <div class="flex-1">
                                     <h3 class="font-medium text-base text-slate-700">${drink.name}</h3>
                                     <div class="flex flex-wrap gap-2 mt-2">
@@ -180,10 +201,10 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-1">
-                                    <button onclick="copyInfo('${store.name}', ${drink.id})" class="p-2 text-[#D0C5BD] hover:text-[#B09B8E] copy-btn-${drink.id}">
+                                    <button onclick="copyInfo('${store.name}', ${drink.id})" class="p-2 text-[#D0C5BD] hover:text-[#B09B8E] copy-btn-${drink.id} transition-colors">
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" /></svg>
                                     </button>
-                                    <button onclick="deleteDrink(${drink.id})" class="p-2 text-slate-200 hover:text-red-300">
+                                    <button onclick="deleteDrink(${drink.id})" class="p-2 text-slate-200 hover:text-red-300 transition-colors">
                                         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                     </button>
                                 </div>
@@ -198,6 +219,7 @@
         // 行動功能
         function toggleModal(id, show) {
             document.getElementById(id).style.display = show ? 'flex' : 'none';
+            if(show) document.getElementById('storeNameInput').focus();
         }
 
         function setActiveStore(id) {
@@ -217,6 +239,7 @@
 
         function deleteStore(e, id) {
             e.stopPropagation();
+            if(!confirm(`確定要刪除此店家嗎？`)) return;
             state.stores = state.stores.filter(s => s.id !== id);
             render();
         }
@@ -238,7 +261,8 @@
         }
 
         function addDrink() {
-            const name = document.getElementById('drinkNameInput').value;
+            const nameInput = document.getElementById('drinkNameInput');
+            const name = nameInput.value;
             if (!name.trim()) return;
             
             const drink = {
@@ -251,8 +275,9 @@
             };
 
             const store = state.stores.find(s => s.id === state.activeStoreId);
-            store.drinks.push(drink);
+            store.drinks.unshift(drink); // 新的放前面
             state.selectedToppings = [];
+            nameInput.value = '';
             render();
         }
 
@@ -268,17 +293,24 @@
             const toppingStr = drink.toppings.length > 0 ? ` +${drink.toppings.join(', ')}` : '';
             const text = `[${storeName}] ${drink.name} (${drink.size}/${drink.sugar}/${drink.ice})${toppingStr}`;
 
+            // 備用複製方法以確保相容性
             const el = document.createElement('textarea');
             el.value = text;
+            el.setAttribute('readonly', '');
+            el.style.position = 'absolute';
+            el.style.left = '-9999px';
             document.body.appendChild(el);
             el.select();
-            document.execCommand('copy');
+            try {
+                document.execCommand('copy');
+                const btn = document.querySelector(`.copy-btn-${drinkId}`);
+                const originalIcon = btn.innerHTML;
+                btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>`;
+                setTimeout(() => btn.innerHTML = originalIcon, 2000);
+            } catch (err) {
+                console.error('無法複製', err);
+            }
             document.body.removeChild(el);
-
-            const btn = document.querySelector(`.copy-btn-${drinkId}`);
-            const originalIcon = btn.innerHTML;
-            btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>`;
-            setTimeout(() => btn.innerHTML = originalIcon, 2000);
         }
 
         // 初始化渲染
